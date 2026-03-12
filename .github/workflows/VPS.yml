@@ -1,7 +1,7 @@
 name: Temporary Ubuntu VPS via Cloudflare
 
 on:
-  workflow_dispatch: # Allows you to run this manually from the Actions tab
+  workflow_dispatch:
 
 jobs:
   build:
@@ -11,41 +11,42 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y openssh-server
-          
-          # Set the password for the default 'runner' user
           echo "runner:rohan2026" | sudo chpasswd
-          
-          # Enable Password Authentication in sshd_config
           sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-          
-          # Restart the SSH service to apply changes
           sudo systemctl restart ssh
 
       - name: Install and Run Cloudflared
         run: |
-          # Download the latest cloudflared binary
+          # Install cloudflared
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
           
-          # Start the tunnel in the background and pipe logs
+          # Start tunnel and capture BOTH stdout and stderr
           nohup cloudflared tunnel --url ssh://localhost:22 > tunnel.log 2>&1 &
           
-          # Give it a few seconds to establish the connection
-          sleep 5 
+          # Loop until the URL appears in the logs
+          echo "Waiting for Cloudflare URL..."
+          TIMEOUT=30
+          while ! grep -q "trycloudflare.com" tunnel.log; do
+            sleep 2
+            TIMEOUT=$((TIMEOUT-2))
+            if [ $TIMEOUT -le 0 ]; then
+              echo "Timed out waiting for tunnel."
+              exit 1
+            fi
+          done
           
-          # Extract and print the trycloudflare URL
           echo "=========================================="
           echo "Your Cloudflare Tunnel URL is:"
-          grep -o 'https://[^[:space:]]*\.trycloudflare\.com' tunnel.log || echo "URL not found yet. Check the logs manually."
+          grep -o 'https://[^[:space:]]*\.trycloudflare\.com' tunnel.log
           echo "=========================================="
 
       - name: Keep Runner Alive
         run: |
-          echo "Runner is now acting as a VPS. Sleeping for 6 hours..."
-          sleep 21600 # 6 hours in seconds
+          echo "Keep-alive active. Connect now!"
+          sleep 21600 
 
       - name: Reliability Check
         if: always()
-        run: |
-          echo "Workflow has concluded or was cancelled."
+        run: echo "Session ended."
