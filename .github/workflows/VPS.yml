@@ -1,53 +1,35 @@
-name: Temporary Ubuntu VPS via Cloudflare
-
-on:
-  workflow_dispatch:
+name: Bore Bridge to VPS
+on: workflow_dispatch
 
 jobs:
-  build:
+  bridge:
     runs-on: ubuntu-latest
     steps:
       - name: Setup SSH
         run: |
-          sudo apt-get update
-          sudo apt-get install -y openssh-server
+          sudo apt-get update && sudo apt-get install -y openssh-server
           echo "runner:rohan2026" | sudo chpasswd
           sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo sed -i 's/^PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
           sudo systemctl restart ssh
 
-      - name: Install and Run Cloudflared
+      - name: Start Bore Tunnel
         run: |
-          # Install cloudflared
-          curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared.deb
+          # Download Bore
+          curl -L https://github.com/ekzhang/bore/releases/download/v0.5.1/bore-v0.5.1-x86_64-unknown-linux-musl.tar.gz | tar zx
+          sudo mv bore /usr/local/bin/
           
-          # Start tunnel using stdbuf to ensure the log file isn't empty due to buffering
-          nohup stdbuf -oL cloudflared tunnel --url ssh://localhost:22 > tunnel.log 2>&1 &
+          # Start tunnel for SSH (Port 22)
+          echo "Connecting to bore.pub..."
+          nohup bore local 22 --to bore.pub > bore.log 2>&1 &
           
-          echo "Waiting for Cloudflare to generate your URL..."
-          
-          # Wait up to 60 seconds and print the log until the URL appears
-          for i in {1..30}; do
-            if grep -q "trycloudflare.com" tunnel.log; then
-              echo "=========================================="
-              echo "SUCCESS! YOUR SSH URL IS:"
-              grep -o 'https://[^[:space:]]*\.trycloudflare\.com' tunnel.log | head -n 1
-              echo "=========================================="
-              exit 0
-            fi
-            sleep 2
-          done
+          sleep 5
+          grep "listening at" bore.log || (cat bore.log && exit 1)
+          echo "=========================================="
+          echo "CONNECT VIA TERMUX USING:"
+          echo "ssh runner@bore.pub -p $(grep -oP '(?<=listening at bore.pub:)\d+' bore.log)"
+          echo "Password: rohan2026"
+          echo "=========================================="
 
-          echo "FAILED: Tunnel URL not found in logs. Printing last 20 lines for debugging:"
-          tail -n 20 tunnel.log
-          exit 1
-
-      - name: Keep Runner Alive
-        run: |
-          echo "VPS is active. Don't close this tab!"
-          sleep 21600 
-
-      - name: Reliability Check
-        if: always()
-        run: echo "Session cleanup."
+      - name: Keep Alive
+        run: sleep 21600
