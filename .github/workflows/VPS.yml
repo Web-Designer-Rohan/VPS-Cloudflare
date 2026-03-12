@@ -22,31 +22,32 @@ jobs:
           curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
           sudo dpkg -i cloudflared.deb
           
-          # Start tunnel and capture BOTH stdout and stderr
-          nohup cloudflared tunnel --url ssh://localhost:22 > tunnel.log 2>&1 &
+          # Start tunnel using stdbuf to ensure the log file isn't empty due to buffering
+          nohup stdbuf -oL cloudflared tunnel --url ssh://localhost:22 > tunnel.log 2>&1 &
           
-          # Loop until the URL appears in the logs
-          echo "Waiting for Cloudflare URL..."
-          TIMEOUT=30
-          while ! grep -q "trycloudflare.com" tunnel.log; do
-            sleep 2
-            TIMEOUT=$((TIMEOUT-2))
-            if [ $TIMEOUT -le 0 ]; then
-              echo "Timed out waiting for tunnel."
-              exit 1
+          echo "Waiting for Cloudflare to generate your URL..."
+          
+          # Wait up to 60 seconds and print the log until the URL appears
+          for i in {1..30}; do
+            if grep -q "trycloudflare.com" tunnel.log; then
+              echo "=========================================="
+              echo "SUCCESS! YOUR SSH URL IS:"
+              grep -o 'https://[^[:space:]]*\.trycloudflare\.com' tunnel.log | head -n 1
+              echo "=========================================="
+              exit 0
             fi
+            sleep 2
           done
-          
-          echo "=========================================="
-          echo "Your Cloudflare Tunnel URL is:"
-          grep -o 'https://[^[:space:]]*\.trycloudflare\.com' tunnel.log
-          echo "=========================================="
+
+          echo "FAILED: Tunnel URL not found in logs. Printing last 20 lines for debugging:"
+          tail -n 20 tunnel.log
+          exit 1
 
       - name: Keep Runner Alive
         run: |
-          echo "Keep-alive active. Connect now!"
+          echo "VPS is active. Don't close this tab!"
           sleep 21600 
 
       - name: Reliability Check
         if: always()
-        run: echo "Session ended."
+        run: echo "Session cleanup."
